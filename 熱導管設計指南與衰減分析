@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>熱導管設計指南與衰減分析 (V2.0)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS (XLSX) CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        .excel-table th, .excel-table td {
+            border: 1px solid #c0c0c0;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen py-8 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-7xl mx-auto space-y-6">
+        <!-- 頂部資訊區 -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Heat Pipe Design Guide & Analysis
+                    </h1>
+                    <p class="text-sm text-gray-500 mt-1">
+                        AI 伺服器與散熱模組專用。V2.0 新增動態性能圖表與 Excel 公式自動匯出功能（包含衰減率計算）。
+                    </p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button onclick="exportToExcel()" class="inline-flex items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors duration-150 gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        下載 Excel (含衰減公式)
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 視覺化圖表 Dashboard -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- 圖表 1：長度衰減 -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex flex-col">
+                <div class="flex flex-col mb-4 gap-3">
+                    <h3 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                        Qmax vs. 熱管長度 (多維度衰減比對)
+                    </h3>
+                    <!-- 過濾器控制面板 -->
+                    <div class="flex flex-col gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                        <!-- 管徑過濾器 -->
+                        <div class="flex flex-wrap gap-3 text-sm items-center" id="diameterFilters">
+                            <span class="text-gray-600 font-semibold text-xs mr-1">選擇管徑:</span>
+                            <label class="inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" value="φ5" class="text-indigo-600 rounded" checked onchange="updateLengthChart()"> <span class="font-medium text-purple-600">φ5</span></label>
+                            <label class="inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" value="φ6" class="text-indigo-600 rounded" checked onchange="updateLengthChart()"> <span class="font-medium text-blue-600">φ6</span></label>
+                            <label class="inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" value="φ7" class="text-indigo-600 rounded" checked onchange="updateLengthChart()"> <span class="font-medium text-amber-500">φ7</span></label>
+                            <label class="inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" value="φ8" class="text-indigo-600 rounded" checked onchange="updateLengthChart()"> <span class="font-medium text-red-500">φ8</span></label>
+                        </div>
+                        <!-- 厚度過濾器 (JS動態生成) -->
+                        <div class="flex flex-wrap gap-2 text-sm items-center" id="thicknessFilters">
+                            <!-- Checkboxes will be injected here -->
+                        </div>
+                    </div>
+                </div>
+                <div class="relative flex-grow min-h-[250px] w-full">
+                    <canvas id="lengthChart"></canvas>
+                </div>
+                <p class="text-xs text-gray-500 mt-3 text-center">支援多管徑交差比對。線條越粗/深代表打扁越少；極度打扁將以虛線呈現。滑鼠懸停可檢視詳細瓦數排序。</p>
+            </div>
+
+            <!-- 圖表 2：打扁厚度衰減 -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                    Qmax vs. 打扁厚度 (L=100mm)
+                </h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="thicknessChart"></canvas>
+                </div>
+                <p class="text-xs text-gray-500 mt-3 text-center">展示 100mm 長度下，過度打扁對毛細與蒸汽極限的破壞程度。</p>
+            </div>
+        </div>
+
+        <!-- 表格區域 -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            <div class="p-4 border-b border-gray-200 bg-gray-50">
+                <h3 class="text-sm font-semibold text-gray-700">原始設計數據表 (Straight Heat Pipe)</h3>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-center border-collapse excel-table text-sm">
+                    <thead>
+                        <tr class="bg-[#E2EFDA] text-gray-800 font-semibold">
+                            <th rowspan="2" class="p-2 border-r border-gray-300 w-16 min-w-[60px]">Diameter</th>
+                            <th rowspan="2" class="p-2 border-r border-gray-300 w-28 min-w-[110px]">Flatten Thickness</th>
+                            <th rowspan="2" class="p-2 border-r border-gray-300 w-28 min-w-[110px]">Flat width</th>
+                            <th rowspan="2" class="p-2 border-r border-gray-300 w-20 min-w-[80px]">Delta T</th>
+                            <th colspan="11" class="p-1.5 border-b border-gray-300">HP Length/POWER(W)</th>
+                        </tr>
+                        <tr class="bg-[#E2EFDA] text-gray-700 font-semibold">
+                            <th class="p-1 border-r border-gray-300 w-14">100mm</th>
+                            <th class="p-1 border-r border-gray-300 w-14">150mm</th>
+                            <th class="p-1 border-r border-gray-300 w-14">200mm</th>
+                            <th class="p-1 border-r border-gray-300 w-14">250mm</th>
+                            <th class="p-1 border-r border-gray-300 w-14">300mm</th>
+                            <th class="p-1 border-r border-gray-300 w-14">350mm</th>
+                            <th class="p-1 border-r border-gray-300 w-14">400mm</th>
+                            <th class="p-1 border-r border-gray-300 w-14">450mm</th>
+                            <th class="p-1 border-r border-gray-300 w-14">500mm</th>
+                            <th class="p-1 border-r border-gray-300 w-14">550mm</th>
+                            <th class="p-1 w-14">600mm</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-gray-700" id="tableBody"></tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- 浮動成功提示 -->
+        <div id="toast" class="fixed bottom-5 right-5 bg-gray-900 text-white px-4 py-2.5 rounded-lg shadow-lg text-sm flex items-center gap-2 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none">
+            <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+            <span id="toastMsg">成功匯出檔案！</span>
+        </div>
+    </div>
+
+    <script>
+        // 原始圖表轉譯之結構化數據
+        const DATA = [
+            { diameter: "φ5", thickness: "0.5", width: "8", deltaT: "< 5°C", powers: ["6", "4", "", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ5", thickness: "1", width: "7.7", deltaT: "< 5°C", powers: ["12", "10", "", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ5", thickness: "1.5", width: "7.4", deltaT: "< 5°C", powers: ["25", "18", "15", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ5", thickness: "2", width: "7.1", deltaT: "< 3°C", powers: ["35", "27", "22", "17", "", "", "", "", "", "", ""] },
+            { diameter: "φ5", thickness: "2.5", width: "6.8", deltaT: "< 3°C", powers: ["44", "29", "27", "21", "17", "", "", "", "", "", ""] },
+            { diameter: "φ5", thickness: "3", width: "6.5", deltaT: "< 3°C", powers: ["53", "41", "32", "25", "20", "17", "", "", "", "", ""] },
+            { diameter: "φ5", thickness: "3.5", width: "6.2", deltaT: "< 3°C", powers: ["58", "46", "35", "27", "22", "19", "", "", "", "", ""] },
+            { diameter: "φ5", thickness: "4", width: "5.8", deltaT: "< 3°C", powers: ["64", "49", "37", "30", "24", "20", "16", "", "", "", ""] },
+            { diameter: "φ5", thickness: "5", width: "5", deltaT: "< 3°C", powers: ["64", "49", "37", "30", "24", "20", "16", "", "", "", ""] },
+
+            { diameter: "φ6", thickness: "0.5", width: "9.6", deltaT: "< 5°C", powers: ["8", "6", "", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ6", thickness: "1", width: "9.3", deltaT: "< 5°C", powers: ["16", "12", "", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ6", thickness: "1.5", width: "9", deltaT: "< 5°C", powers: ["31", "26", "23", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ6", thickness: "2", width: "8.7", deltaT: "< 3°C", powers: ["41", "36", "31", "23", "", "", "", "", "", "", ""] },
+            { diameter: "φ6", thickness: "2.5", width: "8.4", deltaT: "< 3°C", powers: ["58", "45", "38", "30", "23", "", "", "", "", "", ""] },
+            { diameter: "φ6", thickness: "3", width: "8.1", deltaT: "< 3°C", powers: ["68", "54", "45", "38", "27", "23", "", "", "", "", ""] },
+            { diameter: "φ6", thickness: "3.5", width: "7.8", deltaT: "< 3°C", powers: ["76", "62", "50", "43", "30", "26", "22", "", "", "", ""] },
+            { diameter: "φ6", thickness: "4", width: "7.4", deltaT: "< 3°C", powers: ["83", "68", "55", "45", "37", "32", "27", "24", "", "", ""] },
+            { diameter: "φ6", thickness: "6", width: "6", deltaT: "< 3°C", powers: ["83", "68", "55", "45", "37", "32", "27", "24", "", "", ""] },
+
+            { diameter: "φ7", thickness: "0.5", width: "11.2", deltaT: "< 5°C", powers: ["10", "8", "", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ7", thickness: "1", width: "10.9", deltaT: "< 5°C", powers: ["18", "15", "", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ7", thickness: "1.5", width: "10.6", deltaT: "< 5°C", powers: ["33", "30", "26", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ7", thickness: "2", width: "10.3", deltaT: "< 3°C", powers: ["48", "38", "32", "26", "", "", "", "", "", "", ""] },
+            { diameter: "φ7", thickness: "2.5", width: "10", deltaT: "< 3°C", powers: ["61", "48", "40", "33", "28", "", "", "", "", "", ""] },
+            { diameter: "φ7", thickness: "3", width: "9.7", deltaT: "< 3°C", powers: ["71", "57", "47", "39", "33", "28", "", "", "", "", ""] },
+            { diameter: "φ7", thickness: "3.5", width: "9.4", deltaT: "< 3°C", powers: ["84", "68", "55", "45", "38", "32", "28", "", "", "", ""] },
+            { diameter: "φ7", thickness: "4", width: "9.1", deltaT: "< 3°C", powers: ["93", "75", "60", "48", "42", "36", "31", "27", "", "", ""] },
+            { diameter: "φ7", thickness: "4.5", width: "8.8", deltaT: "< 3°C", powers: ["107", "87", "69", "56", "46", "39", "34", "30", "", "", ""] },
+            { diameter: "φ7", thickness: "5", width: "8.4", deltaT: "< 3°C", powers: ["107", "87", "69", "56", "46", "39", "34", "30", "26", "", ""] },
+            { diameter: "φ7", thickness: "7", width: "7", deltaT: "< 3°C", powers: ["107", "87", "69", "56", "46", "39", "34", "30", "26", "", ""] },
+
+            { diameter: "φ8", thickness: "0.5", width: "12.9", deltaT: "< 5°C", powers: ["12", "10", "", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ8", thickness: "1", width: "12.5", deltaT: "< 5°C", powers: ["24", "21", "", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ8", thickness: "1.5", width: "12.2", deltaT: "< 5°C", powers: ["41", "33", "28", "", "", "", "", "", "", "", ""] },
+            { diameter: "φ8", thickness: "2", width: "11.9", deltaT: "< 3°C", powers: ["52", "41", "36", "29", "", "", "", "", "", "", ""] },
+            { diameter: "φ8", thickness: "2.5", width: "11.6", deltaT: "< 3°C", powers: ["68", "54", "45", "38", "33", "", "", "", "", "", ""] },
+            { diameter: "φ8", thickness: "3", width: "11.3", deltaT: "< 3°C", powers: ["77", "65", "55", "47", "40", "34", "", "", "", "", ""] },
+            { diameter: "φ8", thickness: "4", width: "10.7", deltaT: "< 3°C", powers: ["104", "88", "74", "61", "52", "44", "38", "33", "30", "", ""] },
+            { diameter: "φ8", thickness: "5", width: "10", deltaT: "< 3°C", powers: ["122", "104", "87", "72", "60", "51", "44", "39", "35", "32", "30"] },
+            { diameter: "φ8", thickness: "8", width: "8", deltaT: "< 3°C", powers: ["122", "104", "87", "72", "60", "51", "44", "39", "35", "32", "30"] }
+        ];
+
+        let lengthChartInstance = null; // 新增全域變數以利動態更新圖表
+
+        let allThicknessChecked = true; // 全局變數控制厚度全選狀態
+
+        // 動態生成厚度過濾器
+        function initThicknessFilters() {
+            const container = document.getElementById('thicknessFilters');
+            // 提取所有獨立的厚度數值並由小到大排序
+            const uniqueThicknesses = [...new Set(DATA.map(d => Number(d.thickness)))].sort((a,b) => a-b);
+            
+            let html = '<span class="text-gray-600 font-semibold text-xs mr-1">打扁厚度(mm):</span>';
+            html += `<button onclick="toggleAllThickness()" class="px-2 py-1 text-[10px] font-medium bg-gray-200 hover:bg-gray-300 text-gray-700 rounded mr-1 transition-colors">全選/清除</button>`;
+            
+            uniqueThicknesses.forEach(t => {
+                html += `<label class="inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" value="${t}" class="text-emerald-500 rounded thickness-cb" checked onchange="updateLengthChart()"> <span class="text-gray-700">${t}</span></label>`;
+            });
+            container.innerHTML = html;
+        }
+
+        // 全選或反選所有厚度
+        function toggleAllThickness() {
+            allThicknessChecked = !allThicknessChecked;
+            document.querySelectorAll('.thickness-cb').forEach(cb => {
+                cb.checked = allThicknessChecked;
+            });
+            updateLengthChart();
+        }
+
+        // 渲染表格 (保持與原版相同邏輯)
+        function renderTable() {
+            const body = document.getElementById("tableBody");
+            let html = "";
+            const rowspans = { "φ5": { total: 9, deltaT1: 3, deltaT2: 6 }, "φ6": { total: 9, deltaT1: 3, deltaT2: 6 }, "φ7": { total: 11, deltaT1: 3, deltaT2: 8 }, "φ8": { total: 9, deltaT1: 3, deltaT2: 6 } };
+            let currentDiameter = "", currentDeltaTGroup = -1;
+
+            DATA.forEach((row, index) => {
+                let dSpanHtml = "", tSpanHtml = "";
+                if (row.diameter !== currentDiameter) {
+                    currentDiameter = row.diameter;
+                    dSpanHtml = `<td rowspan="${rowspans[currentDiameter].total}" class="bg-[#E2EFDA] font-bold text-gray-800 border-r border-b border-gray-300 text-base">${currentDiameter}</td>`;
+                    currentDeltaTGroup = -1;
+                }
+                const isFirstDeltaTGroup = row.deltaT === "< 5°C";
+                const targetDeltaTGroup = isFirstDeltaTGroup ? 0 : 1;
+                if (targetDeltaTGroup !== currentDeltaTGroup) {
+                    currentDeltaTGroup = targetDeltaTGroup;
+                    const spanSize = isFirstDeltaTGroup ? rowspans[currentDiameter].deltaT1 : rowspans[currentDiameter].deltaT2;
+                    tSpanHtml = `<td rowspan="${spanSize}" class="bg-[#E2EFDA] text-xs font-semibold text-gray-700 border-r border-b border-gray-300">${row.deltaT}</td>`;
+                }
+
+                const rowBg = (index % 2 === 0) ? 'bg-purple-50/20' : 'bg-white';
+                html += `<tr class="${rowBg} hover:bg-purple-50/40 transition-colors">`;
+                html += dSpanHtml;
+                html += `<td class="p-2 border-r border-b border-gray-300 text-gray-800 font-medium">${row.thickness}</td>`;
+                html += `<td class="p-2 border-r border-b border-gray-300 text-gray-600">${row.width}</td>`;
+                html += tSpanHtml;
+
+                row.powers.forEach((p, pIdx) => {
+                    const cellBg = p !== "" ? "bg-[#F2E6FF]/70 text-purple-950 font-semibold" : "text-gray-300";
+                    const borderStyle = pIdx === row.powers.length - 1 ? "border-b border-gray-300" : "border-r border-b border-gray-300";
+                    html += `<td class="p-1.5 ${cellBg} ${borderStyle}">${p || "-"}</td>`;
+                });
+                html += `</tr>`;
+            });
+            body.innerHTML = html;
+        }
+
+        // 動態更新長度衰減圖表
+        function updateLengthChart() {
+            const lengths = [100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600];
+            const selectedDiameters = Array.from(document.querySelectorAll('#diameterFilters input:checked')).map(cb => cb.value);
+            const selectedThicknesses = Array.from(document.querySelectorAll('.thickness-cb:checked')).map(cb => cb.value);
+
+            // 定義管徑專屬色系 (搭配透明度變化)
+            const colorPalette = {
+                "φ5": { r: 139, g: 92, b: 246 }, // Purple
+                "φ6": { r: 59, g: 130, b: 246 }, // Blue
+                "φ7": { r: 245, g: 158, b: 11 }, // Amber
+                "φ8": { r: 239, g: 68, b: 68 }   // Red
+            };
+
+            const datasets = [];
+
+            selectedDiameters.forEach(d => {
+                // 取出該管徑所有資料，並過濾「勾選的管徑」與「勾選的厚度」，依厚度由大到小排序
+                const rows = DATA.filter(r => r.diameter === d && selectedThicknesses.includes(r.thickness))
+                                 .sort((a, b) => Number(b.thickness) - Number(a.thickness));
+                const totalRows = rows.length;
+
+                rows.forEach((row, idx) => {
+                    const dataPoints = row.powers.map(p => p === "" ? null : Number(p));
+                    if (dataPoints.every(p => p === null)) return; // 略過全空數據
+
+                    // 厚度視覺映射邏輯
+                    const opacity = Math.max(0.3, 1 - (idx / totalRows) * 0.7); 
+                    const lineWidth = Math.max(1, 3 - (idx / totalRows) * 2);
+                    const originalDia = Number(d.replace('φ', ''));
+                    const isVeryThin = (Number(row.thickness) <= originalDia * 0.35); // 壓縮至原管徑 35% 以下視為極度打扁
+
+                    const c = colorPalette[d];
+                    
+                    datasets.push({
+                        label: `${d} (厚 ${row.thickness}mm)`,
+                        data: dataPoints,
+                        borderColor: `rgba(${c.r}, ${c.g}, ${c.b}, ${opacity})`,
+                        backgroundColor: `rgba(${c.r}, ${c.g}, ${c.b}, ${opacity})`,
+                        borderWidth: lineWidth,
+                        borderDash: isVeryThin ? [5, 5] : [],
+                        tension: 0.1,
+                        spanGaps: true,
+                        pointRadius: lineWidth > 1.5 ? 3 : 0, // 隱藏細線的點以維持版面整潔
+                        pointHoverRadius: 5
+                    });
+                });
+            });
+
+            if (lengthChartInstance) {
+                lengthChartInstance.data.datasets = datasets;
+                lengthChartInstance.update();
+            } else {
+                const ctx = document.getElementById('lengthChart').getContext('2d');
+                lengthChartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: { labels: lengths.map(l => l + 'mm'), datasets: datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false }, // 游標對齊同一個 X 軸
+                        plugins: {
+                            legend: { display: false }, // 關閉圖例，避免 30+ 條線撐破版面
+                            tooltip: {
+                                itemSort: (a, b) => b.raw - a.raw // Tooltip 內部依瓦數高低排序
+                            }
+                        },
+                        scales: { y: { title: { display: true, text: 'Qmax (W)' }, beginAtZero: true } }
+                    }
+                });
+            }
+        }
+
+        // 初始化圖表
+        function initCharts() {
+            // 0. 優先初始化厚度過濾器介面
+            initThicknessFilters();
+            
+            // 1. 初始化長度衰減圖表 (全系列)
+            updateLengthChart();
+
+            // 2. 厚度衰減圖表 (固定 100mm)
+            const thicknessCtx = document.getElementById('thicknessChart').getContext('2d');
+            // 提取所有厚度並排序去重
+            const allThicknesses = [...new Set(DATA.map(d => Number(d.thickness)))].sort((a,b)=>a-b);
+            const diameters = ["φ5", "φ6", "φ7", "φ8"];
+            const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444'];
+
+            const thicknessDatasets = diameters.map((d, i) => {
+                const dataPoints = allThicknesses.map(t => {
+                    const row = DATA.find(r => r.diameter === d && Number(r.thickness) === t);
+                    return row && row.powers[0] !== "" ? Number(row.powers[0]) : null;
+                });
+                return {
+                    label: d + ' (100mm長)',
+                    data: dataPoints,
+                    borderColor: colors[i],
+                    backgroundColor: colors[i],
+                    tension: 0.3,
+                    spanGaps: true
+                };
+            });
+
+            new Chart(thicknessCtx, {
+                type: 'line',
+                data: { labels: allThicknesses.map(t => t + 'mm'), datasets: thicknessDatasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { title: { display: true, text: 'Qmax (W) at 100mm' }, beginAtZero: true } }
+                }
+            });
+        }
+
+        // 匯出包含原生公式的 Excel
+        function exportToExcel() {
+            try {
+                const wb = XLSX.utils.book_new();
+                
+                // 基礎資料準備
+                const ws_data = [
+                    ["Heat Pipe Design Guide : Straight heat pipe"], 
+                    ["Diameter", "Flatten Thickness", "Flat width", "Delta T", "100mm", "150mm", "200mm", "250mm", "300mm", "350mm", "400mm", "450mm", "500mm", "550mm", "600mm"]
+                ];
+
+                // 填入原始資料 (對應 Excel 的第 3 行開始，因為陣列索引 2 = Excel row 3)
+                const startDataRowExcel = 3; 
+                DATA.forEach(row => {
+                    ws_data.push([
+                        row.diameter, Number(row.thickness), Number(row.width), row.deltaT,
+                        ...row.powers.map(v => v === "" ? "" : Number(v))
+                    ]);
+                });
+
+                // 加入空行與衰減率表格標題
+                ws_data.push([]);
+                ws_data.push([]);
+                ws_data.push(["長度增加之性能衰減率 (Excel公式自動計算) - 以 100mm 為基準"]);
+                ws_data.push(["Diameter", "Flatten Thickness", "Flat width", "Delta T", "100mm (Base)", "150mm", "200mm", "250mm", "300mm", "350mm", "400mm", "450mm", "500mm", "550mm", "600mm"]);
+
+                // 填入公式列
+                DATA.forEach((row, idx) => {
+                    const origExcelRow = startDataRowExcel + idx; // 對應原始數據所在的 Excel 列號
+                    
+                    const formulaRow = [
+                        row.diameter, Number(row.thickness), Number(row.width), row.deltaT,
+                        "0%" // 100mm 是基準，衰減 0%
+                    ];
+
+                    // 為 150mm ~ 600mm 產生相對應的 Excel 原生公式
+                    for (let i = 1; i < 11; i++) {
+                        if (row.powers[i] !== "") {
+                            const currentTargetCol = String.fromCharCode(69 + i); // 69='E'(100mm), 70='F'(150mm)...
+                            // 衰減公式: =(目前長度Qmax - 100mmQmax) / 100mmQmax
+                            // 例如: =(F3-$E3)/$E3
+                            const formulaStr = `(${currentTargetCol}${origExcelRow}-$E${origExcelRow})/$E${origExcelRow}`;
+                            
+                            // 寫入 SheetJS 支援的公式物件格式 (t: 'n' 表示數值, f: 公式, z: 格式化為百分比)
+                            formulaRow.push({ t: 'n', f: formulaStr, z: '0.0%' });
+                        } else {
+                            formulaRow.push("");
+                        }
+                    }
+                    ws_data.push(formulaRow);
+                });
+
+                const ws = XLSX.utils.aoa_to_sheet(ws_data);
+
+                // 設定欄寬
+                ws['!cols'] = [
+                    { wch: 10 }, { wch: 18 }, { wch: 15 }, { wch: 10 },
+                    { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+                    { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }
+                ];
+
+                XLSX.utils.book_append_sheet(wb, ws, "Heat Pipe Analysis");
+                XLSX.writeFile(wb, "Heat_Pipe_Degradation_Analysis.xlsx");
+
+                showToast("Excel 檔案匯出成功！請查看下方新產生的公式表。");
+            } catch (err) {
+                console.error(err);
+                showToast("匯出 Excel 失敗，請重試！");
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById("toast");
+            document.getElementById("toastMsg").innerText = msg;
+            toast.classList.remove("translate-y-20", "opacity-0");
+            toast.classList.add("translate-y-0", "opacity-100");
+            setTimeout(() => {
+                toast.classList.remove("translate-y-0", "opacity-100");
+                toast.classList.add("translate-y-20", "opacity-0");
+            }, 3000);
+        }
+
+        window.onload = function() {
+            renderTable();
+            initCharts();
+        }
+    </script>
+</body>
+</html>
